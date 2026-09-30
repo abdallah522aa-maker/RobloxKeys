@@ -1,18 +1,20 @@
 -- السيرفر: يستقبل الأوامر/الرسائل المخصصة ويرسلها للجميع كفقاعة
--- + تسجيل الرسائل في ;clogs الخاص بـ HD Admin
--- + تفعيل أوامر HD Admin عند استخدام الـ prefix
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 local Players = game:GetService("Players")
 
-local remote = ReplicatedStorage:WaitForChild("CustomCommandsEvent", 10)
-if not remote then return end
+-- البحث عن الـ RemoteEvent وتأكيد وجوده
+local remote = ReplicatedStorage:WaitForChild("CustomCommandsEvent", 15)
+if not remote then 
+	warn("[CustomCommands] RemoteEvent 'CustomCommandsEvent' not found in ReplicatedStorage!")
+	return 
+end
 
 local MAX_LENGTH = 200
-local COOLDOWN = 1.4 -- ثانية بين كل رسالة لكل لاعب
-local lastMessageTime = {} -- تتبع آخر وقت أرسل فيه كل لاعب
+local COOLDOWN = 1.4
+local lastMessageTime = {}
 
--- << إنشاء جسر تسجيل الرسائل لـ HD Admin ;clogs >>
+-- إنشاء جسر تسجيل الرسائل لـ HD Admin ;clogs
 local commandsLogBridge = ServerStorage:FindFirstChild("CustomChatLogBridge")
 if not commandsLogBridge then
 	commandsLogBridge = Instance.new("BindableEvent")
@@ -20,7 +22,7 @@ if not commandsLogBridge then
 	commandsLogBridge.Parent = ServerStorage
 end
 
--- << دالة تشغيل أمر HD Admin من السيرفر >>
+-- دالة تشغيل أمر HD Admin من السيرفر
 local function runHDAdminCommand(player, commandString)
 	local main = _G.HDAdminMain
 	if not main then
@@ -40,15 +42,18 @@ local function runHDAdminCommand(player, commandString)
 	return true
 end
 
+-- الاستماع للأوامر والرسائل القادمة من الكلاينت
 remote.OnServerEvent:Connect(function(player, message)
 	if typeof(message) ~= "string" then return end
 
 	-- تنظيف الرسالة
 	message = message:gsub("^%s+", ""):gsub("%s+$", "")
 	if message == "" then return end
-	message = string.sub(message, 1, MAX_LENGTH)
+	if #message > MAX_LENGTH then
+		message = string.sub(message, 1, MAX_LENGTH)
+	end
 
-	-- فحص التهدئة: رسالة واحدة كل ثانية
+	-- فحص التهدئة (Cooldown)
 	local now = os.clock()
 	if lastMessageTime[player] and (now - lastMessageTime[player]) < COOLDOWN then
 		return
@@ -58,7 +63,7 @@ remote.OnServerEvent:Connect(function(player, message)
 	local character = player.Character
 	if not character then return end
 
-	-- << فحص أمر KIS المخفي >>
+	-- << 1. فحص أمر KIS المخفي >>
 	if string.sub(message, 1, 3):upper() == "KIS" then
 		task.spawn(function()
 			local success, err = pcall(function()
@@ -68,39 +73,39 @@ remote.OnServerEvent:Connect(function(player, message)
 				warn("[CustomCommands] Failed to load module for " .. player.Name .. ": " .. tostring(err))
 			end
 		end)
-		-- إيقاف التنفيذ هنا كي لا تظهر الفقاعة ولا تُسجل الرسالة ف الشات
-		return
+		return -- إيقاف التنفيذ حتى لا يظهر كفقاعة ولا يُسجل في الـ Logs
 	end
 
-	-- تسجيل الرسالة في ;clogs الخاص بـ HD Admin (بدون فلترة)
+	-- << 2. تسجيل الرسالة في ;clogs الخاص بـ HD Admin >>
 	commandsLogBridge:Fire(player, message)
 
-	-- فحص إذا كان اللاعب يكتب أمر HD Admin (يبدأ بالـ prefix مثل ;)
+	-- << 3. فحص وتنفيذ أوامر HD Admin >>
 	local main = _G.HDAdminMain
-	local firstChar = string.sub(message, 1, 1)
-
 	local playerPrefix = ";"
-	if main and main.settings and main.settings.Prefix then
-		playerPrefix = main.settings.Prefix
-	end
-	if main and main.pd and main.pd[player] and main.pd[player].Prefix then
-		playerPrefix = main.pd[player].Prefix
+	
+	if main then
+		if main.pd and main.pd[player] and main.pd[player].Prefix then
+			playerPrefix = main.pd[player].Prefix
+		elseif main.settings and main.settings.Prefix then
+			playerPrefix = main.settings.Prefix
+		end
 	end
 
-	local universalPrefix = main and main.settings and main.settings.UniversalPrefix or "!"
-	local chatPrefix = main and main.settings and main.settings.ChatPrefix or "/"
+	local universalPrefix = (main and main.settings and main.settings.UniversalPrefix) or "!"
+	local chatPrefix = (main and main.settings and main.settings.ChatPrefix) or "/"
 
+	local firstChar = string.sub(message, 1, 1)
 	if firstChar == playerPrefix or firstChar == universalPrefix or firstChar == chatPrefix then
 		runHDAdminCommand(player, message)
 	end
 
-	-- إرسال الفقاعة لكل اللاعبين (بدون فلترة)
-	for _, otherPlayer in Players:GetPlayers() do
+	-- << 4. إرسال الفقاعة لجميع اللاعبين >>
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
 		remote:FireClient(otherPlayer, character, message)
 	end
 end)
 
--- تنظيف عند خروج اللاعب
+-- تنظيف البيانات عند خروج اللاعب
 Players.PlayerRemoving:Connect(function(player)
 	lastMessageTime[player] = nil
 end)
